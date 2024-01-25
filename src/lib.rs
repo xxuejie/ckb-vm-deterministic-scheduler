@@ -177,7 +177,7 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
 
         // At this point, root VM cannot be suspended
         let root_vm = &self.instantiated[&ROOT_VM_ID];
-        Ok((root_vm.1.machine.exit_code(), root_vm.1.machine.cycles()))
+        Ok((root_vm.1.machine.exit_code(), self.total_cycles))
     }
 
     // This is internal function that does the actual VM execution loop.
