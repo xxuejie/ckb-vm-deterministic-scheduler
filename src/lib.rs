@@ -184,12 +184,9 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
     // Here both pause signal and limit_cycles are provided so as to simplify
     // branches.
     fn iterate(&mut self, pause: Pause, limit_cycles: Cycle) -> Result<Cycle, Error> {
-        // 1. Process message box, update VM states accordingly
-        self.process_message_box()?;
-        assert!(self.message_box.lock().expect("lock").is_empty());
-        // 2. Process all pending VM reads & writes
+        // 1. Process all pending VM reads & writes
         self.process_io()?;
-        // 3. Run an actual VM
+        // 2. Run an actual VM
         // Find a runnable VM that has the largest ID
         let vm_id_to_run = self
             .states
@@ -222,6 +219,9 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
                 .ok_or(Error::CyclesOverflow)?;
             (result, consumed_cycles)
         };
+        // 3. Process message box, update VM states accordingly
+        self.process_message_box()?;
+        assert!(self.message_box.lock().expect("lock").is_empty());
         // 4. If the VM terminates, update VMs in join state, also closes its pipes
         match result {
             Ok(code) => {
