@@ -203,7 +203,8 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
         let vm_id_to_run = vm_id_to_run.unwrap();
         let (result, consumed_cycles) = {
             self.ensure_vms_instantiated(&[vm_id_to_run])?;
-            let (_, machine) = self.instantiated.get_mut(&vm_id_to_run).unwrap();
+            let (context, machine) = self.instantiated.get_mut(&vm_id_to_run).unwrap();
+            context.set_base_cycles(self.total_cycles);
             machine.set_max_cycles(limit_cycles);
             machine.machine.set_pause(pause);
             let result = machine.run();

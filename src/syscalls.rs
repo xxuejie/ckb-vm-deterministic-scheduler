@@ -21,7 +21,7 @@ pub struct MachineContext<
     DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + Clone + 'static,
 > {
     id: VmId,
-    base_cycles: u64,
+    base_cycles: Arc<Mutex<u64>>,
     message_box: Arc<Mutex<Vec<Message>>>,
     snapshot2_context: Arc<Mutex<Snapshot2Context<DataPieceId, TxData<DL>>>>,
 }
@@ -32,7 +32,7 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
     pub fn new(id: VmId, message_box: Arc<Mutex<Vec<Message>>>, tx_data: TxData<DL>) -> Self {
         Self {
             id,
-            base_cycles: 0,
+            base_cycles: Arc::new(Mutex::new(0)),
             message_box,
             snapshot2_context: Arc::new(Mutex::new(Snapshot2Context::new(tx_data))),
         }
@@ -42,15 +42,19 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
         &self.snapshot2_context
     }
 
+    pub fn base_cycles(&self) -> u64 {
+        *self.base_cycles.lock().expect("lock")
+    }
+
     pub fn set_base_cycles(&mut self, base_cycles: u64) {
-        self.base_cycles = base_cycles;
+        *self.base_cycles.lock().expect("lock") = base_cycles;
     }
 
     // The different architecture here requires a re-implementation on current
     // cycles syscall.
     fn current_cycles<Mac: SupportMachine>(&mut self, machine: &mut Mac) -> Result<(), Error> {
         let cycles = self
-            .base_cycles
+            .base_cycles()
             .checked_add(machine.cycles())
             .ok_or(Error::CyclesOverflow)?;
         machine.set_register(A0, Mac::REG::from_u64(cycles));
