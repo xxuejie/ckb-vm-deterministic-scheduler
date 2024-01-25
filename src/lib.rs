@@ -184,9 +184,12 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
     // Here both pause signal and limit_cycles are provided so as to simplify
     // branches.
     fn iterate(&mut self, pause: Pause, limit_cycles: Cycle) -> Result<Cycle, Error> {
-        // 1. Process all pending VM reads & writes
+        // 1. Process message box, update VM states accordingly
+        self.process_message_box()?;
+        assert!(self.message_box.lock().expect("lock").is_empty());
+        // 2. Process all pending VM reads & writes
         self.process_io()?;
-        // 2. Run an actual VM
+        // 3. Run an actual VM
         // Find a runnable VM that has the largest ID
         let vm_id_to_run = self
             .states
@@ -201,7 +204,7 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
             ));
         }
         let vm_id_to_run = vm_id_to_run.unwrap();
-        let (exit_code, consumed_cycles) = {
+        let (result, consumed_cycles) = {
             self.ensure_vms_instantiated(&[vm_id_to_run])?;
             let (_, machine) = self.instantiated.get_mut(&vm_id_to_run).unwrap();
             machine.set_max_cycles(limit_cycles);
@@ -217,45 +220,42 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
                 .total_cycles
                 .checked_add(consumed_cycles)
                 .ok_or(Error::CyclesOverflow)?;
-            match result {
-                Ok(code) => (Some(code), consumed_cycles),
-                Err(Error::External(msg)) if msg == "YIELD" => (None, consumed_cycles),
-                Err(e) => return Err(e),
-            }
+            (result, consumed_cycles)
         };
-        // 3. If the VM terminates, update VMs in join state, also closes its pipes
-        if let Some(code) = exit_code {
-            let mut joining_vms: Vec<(VmId, u64)> = Vec::new();
-            self.states.iter().for_each(|(vm_id, state)| {
-                if let VmState::Join {
-                    target_vm_id,
-                    exit_code_addr,
-                } = state
-                {
-                    if *target_vm_id == vm_id_to_run {
-                        joining_vms.push((*vm_id, *exit_code_addr));
+        // 4. If the VM terminates, update VMs in join state, also closes its pipes
+        match result {
+            Ok(code) => {
+                let mut joining_vms: Vec<(VmId, u64)> = Vec::new();
+                self.states.iter().for_each(|(vm_id, state)| {
+                    if let VmState::Join {
+                        target_vm_id,
+                        exit_code_addr,
+                    } = state
+                    {
+                        if *target_vm_id == vm_id_to_run {
+                            joining_vms.push((*vm_id, *exit_code_addr));
+                        }
                     }
+                });
+                // For all joining VMs, update exit code, then mark them as
+                // runnable state.
+                for (vm_id, exit_code_addr) in joining_vms {
+                    self.ensure_vms_instantiated(&[vm_id])?;
+                    let (_, machine) = self.instantiated.get_mut(&vm_id).unwrap();
+                    machine
+                        .machine
+                        .memory_mut()
+                        .store8(&exit_code_addr, &u64::from_i8(code))?;
+                    machine.machine.set_register(A0, SUCCESS as u64);
+                    self.states.insert(vm_id, VmState::Runnable);
                 }
-            });
-            // For all joining VMs, update exit code, then mark them as
-            // runnable state.
-            for (vm_id, exit_code_addr) in joining_vms {
-                self.ensure_vms_instantiated(&[vm_id])?;
-                let (_, machine) = self.instantiated.get_mut(&vm_id).unwrap();
-                machine
-                    .machine
-                    .memory_mut()
-                    .store8(&exit_code_addr, &u64::from_i8(code))?;
-                machine.machine.set_register(A0, SUCCESS as u64);
-                self.states.insert(vm_id, VmState::Runnable);
+                // Close pipes
+                self.pipes.retain(|_, vm_id| *vm_id != vm_id_to_run);
+                Ok(consumed_cycles)
             }
-            // Close pipes
-            self.pipes.retain(|_, vm_id| *vm_id != vm_id_to_run);
+            Err(Error::External(msg)) if msg == "YIELD" => Ok(consumed_cycles),
+            Err(e) => Err(e),
         }
-        // 4. Process message box, update VM states accordingly
-        self.process_message_box()?;
-        assert!(self.message_box.lock().expect("lock").is_empty());
-        Ok(consumed_cycles)
     }
 
     fn process_message_box(&mut self) -> Result<(), Error> {
