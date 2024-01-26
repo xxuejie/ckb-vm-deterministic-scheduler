@@ -226,32 +226,47 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
         // 4. If the VM terminates, update VMs in join state, also closes its pipes
         match result {
             Ok(code) => {
-                let mut joining_vms: Vec<(VmId, u64)> = Vec::new();
-                self.states.iter().for_each(|(vm_id, state)| {
-                    if let VmState::Join {
-                        target_vm_id,
-                        exit_code_addr,
-                    } = state
-                    {
-                        if *target_vm_id == vm_id_to_run {
-                            joining_vms.push((*vm_id, *exit_code_addr));
+                // When root VM terminates, the execution stops immediately, we will purge
+                // all non-root VMs, and only keep root VM in states.
+                // When non-root VM terminates, we only purge the VM's own states.
+                if vm_id_to_run == ROOT_VM_ID {
+                    self.ensure_vms_instantiated(&[vm_id_to_run])?;
+                    self.instantiated.retain(|id, _| *id == vm_id_to_run);
+                    self.suspended.clear();
+                    self.states.clear();
+                    self.states.insert(vm_id_to_run, VmState::Terminated);
+                } else {
+                    let mut joining_vms: Vec<(VmId, u64)> = Vec::new();
+                    self.states.iter().for_each(|(vm_id, state)| {
+                        if let VmState::Join {
+                            target_vm_id,
+                            exit_code_addr,
+                        } = state
+                        {
+                            if *target_vm_id == vm_id_to_run {
+                                joining_vms.push((*vm_id, *exit_code_addr));
+                            }
                         }
+                    });
+                    // For all joining VMs, update exit code, then mark them as
+                    // runnable state.
+                    for (vm_id, exit_code_addr) in joining_vms {
+                        self.ensure_vms_instantiated(&[vm_id])?;
+                        let (_, machine) = self.instantiated.get_mut(&vm_id).unwrap();
+                        machine
+                            .machine
+                            .memory_mut()
+                            .store8(&exit_code_addr, &u64::from_i8(code))?;
+                        machine.machine.set_register(A0, SUCCESS as u64);
+                        self.states.insert(vm_id, VmState::Runnable);
                     }
-                });
-                // For all joining VMs, update exit code, then mark them as
-                // runnable state.
-                for (vm_id, exit_code_addr) in joining_vms {
-                    self.ensure_vms_instantiated(&[vm_id])?;
-                    let (_, machine) = self.instantiated.get_mut(&vm_id).unwrap();
-                    machine
-                        .machine
-                        .memory_mut()
-                        .store8(&exit_code_addr, &u64::from_i8(code))?;
-                    machine.machine.set_register(A0, SUCCESS as u64);
-                    self.states.insert(vm_id, VmState::Runnable);
+                    // Close pipes
+                    self.pipes.retain(|_, vm_id| *vm_id != vm_id_to_run);
+                    // Clear terminated VM states
+                    self.states.remove(&vm_id_to_run);
+                    self.instantiated.remove(&vm_id_to_run);
+                    self.suspended.remove(&vm_id_to_run);
                 }
-                // Close pipes
-                self.pipes.retain(|_, vm_id| *vm_id != vm_id_to_run);
                 Ok(consumed_cycles)
             }
             Err(Error::External(msg)) if msg == "YIELD" => Ok(consumed_cycles),
