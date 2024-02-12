@@ -18,7 +18,7 @@ pub const FIRST_VM_ID: VmId = 0;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PipeId(pub(crate) u64);
 
-pub const FIRST_PIPE_SLOT: u64 = 1;
+pub const FIRST_PIPE_SLOT: u64 = 2;
 
 impl PipeId {
     pub fn create(slot: u64) -> (PipeId, PipeId, u64) {
@@ -30,11 +30,11 @@ impl PipeId {
     }
 
     pub fn is_read(&self) -> bool {
-        self.0 % 2 == 1
+        self.0 % 2 == 0
     }
 
     pub fn is_write(&self) -> bool {
-        self.0 % 2 == 0
+        self.0 % 2 == 1
     }
 }
 
