@@ -150,7 +150,7 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
     /// consumed cycles.
     ///
     /// Err would be returned in the following cases:
-    /// * Cycle limit reached, the returned error would be ckb_vmError::CyclesExceeded,
+    /// * Cycle limit reached, the returned error would be ckb_vm::Error::CyclesExceeded,
     /// * Pause trigger, the returned error would be ckb_vm::Error::Pause,
     /// * Other terminating errors
     pub fn run(&mut self, mode: RunMode) -> Result<(i8, Cycle), Error> {
