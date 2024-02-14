@@ -98,12 +98,12 @@ fn main() {
 
         loop {
             if scheduler.consumed_cycles() > args.max_cycles {
-                log::error!("{} of hash {} runs out of max cycles!", t, hash);
+                log::error!("{} of hash {:#x} runs out of max cycles!", t, hash);
                 exit(1);
             }
 
             log::debug!(
-                "Run {} of hash {} with {} limit cycles",
+                "Run {} of hash {:#x} with {} limit cycles",
                 t,
                 hash,
                 args.cycles_per_round
@@ -111,11 +111,11 @@ fn main() {
             match scheduler.run(RunMode::LimitCycles(args.cycles_per_round)) {
                 Ok((exit_code, total_cycles)) => {
                     if total_cycles > args.max_cycles {
-                        log::error!("{} of hash {} runs out of max cycles!", t, hash);
+                        log::error!("{} of hash {:#x} runs out of max cycles!", t, hash);
                         return;
                     }
                     log::info!(
-                        "{} of hash {} terminates, exit code: {}, consumed cycles: {}",
+                        "{} of hash {:#x} terminates, exit code: {}, consumed cycles: {}",
                         t,
                         hash,
                         exit_code,
@@ -125,7 +125,7 @@ fn main() {
                 }
                 Err(Error::CyclesExceeded) => (),
                 Err(e) => {
-                    log::error!("{} of hash {} encounters error: {:?}", t, hash, e);
+                    log::error!("{} of hash {:#x} encounters error: {:?}", t, hash, e);
                     exit(1);
                 }
             }
