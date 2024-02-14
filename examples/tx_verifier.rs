@@ -12,8 +12,8 @@ use serde_json::from_str as from_json_str;
 use std::collections::HashSet;
 use std::fs::read_to_string;
 use std::io::{stdin, Read};
-use std::sync::Arc;
 use std::process::exit;
+use std::sync::Arc;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
