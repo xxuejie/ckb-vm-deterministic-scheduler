@@ -109,6 +109,12 @@ fn main() {
             if scheduler.consumed_cycles() - last_suspended_cycles >= args.cycles_per_suspend {
                 // Perform a full suspend here.
                 let state = scheduler.suspend().expect("suspend");
+                log::debug!(
+                    "{} of hash {:#x} suspended state size: {} bytes",
+                    t,
+                    hash,
+                    state.size()
+                );
                 scheduler = {
                     let verifier = TransactionScriptsVerifier::new(
                         resolved_tx.clone(),

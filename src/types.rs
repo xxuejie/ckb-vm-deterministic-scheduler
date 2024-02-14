@@ -7,8 +7,9 @@ use ckb_vm::{
     bytes::Bytes,
     machine::Pause,
     snapshot2::{DataSource, Snapshot2},
-    Error,
+    Error, RISCV_GENERAL_REGISTER_NUMBER,
 };
+use std::mem::size_of;
 use std::sync::Arc;
 
 pub type VmId = u64;
@@ -139,6 +140,33 @@ pub struct FullSuspendedState {
     pub next_pipe_slot: u64,
     pub vms: Vec<(VmId, VmState, Snapshot2<DataPieceId>)>,
     pub pipes: Vec<(PipeId, VmId)>,
+}
+
+impl FullSuspendedState {
+    pub fn size(&self) -> u64 {
+        (size_of::<Cycle>()
+            + size_of::<VmId>()
+            + size_of::<u64>()
+            + self.vms.iter().fold(0, |mut acc, (_, _, snapshot)| {
+                acc += size_of::<VmId>() + size_of::<VmState>();
+                acc += snapshot.pages_from_source.len()
+                    * (size_of::<u64>()
+                        + size_of::<u8>()
+                        + size_of::<DataPieceId>()
+                        + size_of::<u64>()
+                        + size_of::<u64>());
+                for dirty_page in &snapshot.dirty_pages {
+                    acc += size_of::<u64>() + size_of::<u8>() + dirty_page.2.len();
+                }
+                acc += size_of::<u32>()
+                    + RISCV_GENERAL_REGISTER_NUMBER * size_of::<u64>()
+                    + size_of::<u64>()
+                    + size_of::<u64>()
+                    + size_of::<u64>();
+                acc
+            })
+            + (self.pipes.len() * (size_of::<PipeId>() + size_of::<VmId>()))) as u64
+    }
 }
 
 /// Context data for current running transaction & script
