@@ -116,20 +116,13 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
     /// Suspend current scheduler into a serializable full state
     pub fn suspend(mut self) -> Result<FullSuspendedState, Error> {
         let mut vms = Vec::with_capacity(self.states.len());
+        let instantiated_ids: Vec<_> = self.instantiated.keys().cloned().collect();
+        for id in instantiated_ids {
+            self.suspend_vm(&id)?;
+        }
         for (id, state) in self.states {
-            if let Some(snapshot) = self.suspended.remove(&id) {
-                vms.push((id, state, snapshot));
-            } else {
-                let (context, mut machine) = self
-                    .instantiated
-                    .remove(&id)
-                    .expect("A VM must either be instantiated, or suspended!");
-                let snapshot = {
-                    let sc = context.snapshot2_context().lock().expect("lock");
-                    sc.make_snapshot(&mut machine.machine)?
-                };
-                vms.push((id, state, snapshot));
-            }
+            let snapshot = self.suspended.remove(&id).unwrap();
+            vms.push((id, state, snapshot));
         }
         Ok(FullSuspendedState {
             total_cycles: self.total_cycles,
@@ -601,6 +594,7 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
 
     // Resume a suspended VM
     fn resume_vm(&mut self, id: &VmId) -> Result<(), Error> {
+        log::debug!("Resuming VM: {}", id);
         if !self.suspended.contains_key(id) {
             return Err(Error::Unexpected(format!("VM {:?} is not suspended!", id)));
         }
@@ -618,6 +612,7 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
 
     // Suspend an instantiated VM
     fn suspend_vm(&mut self, id: &VmId) -> Result<(), Error> {
+        log::debug!("Suspending VM: {}", id);
         if !self.instantiated.contains_key(id) {
             return Err(Error::Unexpected(format!(
                 "VM {:?} is not instantiated!",

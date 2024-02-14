@@ -22,7 +22,10 @@ struct Args {
     tx_file: String,
 
     #[arg(short, long, default_value_t = 5_000_000)]
-    cycles_per_round: u64,
+    cycles_per_iterate: u64,
+
+    #[arg(short, long, default_value_t = 20_000_000)]
+    cycles_per_suspend: u64,
 
     #[arg(short, long, default_value_t = 18446744073709551615)]
     max_cycles: u64,
@@ -94,7 +97,8 @@ fn main() {
             script_group: Arc::new(group),
         };
 
-        let mut scheduler = Scheduler::new(tx_data, verifier);
+        let mut scheduler = Scheduler::new(tx_data.clone(), verifier);
+        let mut last_suspended_cycles = 0;
 
         loop {
             if scheduler.consumed_cycles() > args.max_cycles {
@@ -102,13 +106,28 @@ fn main() {
                 exit(1);
             }
 
+            if scheduler.consumed_cycles() - last_suspended_cycles >= args.cycles_per_suspend {
+                // Perform a full suspend here.
+                let state = scheduler.suspend().expect("suspend");
+                scheduler = {
+                    let verifier = TransactionScriptsVerifier::new(
+                        resolved_tx.clone(),
+                        resource.clone(),
+                        consensus.clone(),
+                        tx_env.clone(),
+                    );
+                    Scheduler::resume(tx_data.clone(), verifier, state)
+                };
+                last_suspended_cycles = scheduler.consumed_cycles();
+            }
+
             log::debug!(
-                "Run {} of hash {:#x} with {} limit cycles",
+                "Iterate {} of hash {:#x} with {} limit cycles",
                 t,
                 hash,
-                args.cycles_per_round
+                args.cycles_per_iterate
             );
-            match scheduler.run(RunMode::LimitCycles(args.cycles_per_round)) {
+            match scheduler.run(RunMode::LimitCycles(args.cycles_per_iterate)) {
                 Ok((exit_code, total_cycles)) => {
                     if total_cycles > args.max_cycles {
                         log::error!("{} of hash {:#x} runs out of max cycles!", t, hash);
