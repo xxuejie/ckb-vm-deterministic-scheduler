@@ -56,7 +56,6 @@ pub enum VmState {
     },
     WaitForRead {
         pipe: PipeId,
-        filled: u64,
         length: u64,
         buffer_addr: u64,
         length_addr: u64,

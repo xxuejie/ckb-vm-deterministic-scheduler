@@ -18,3 +18,8 @@ ckb-chain-spec = { git = "https://github.com/xxuejie/ckb", rev = "2fbf14d" }
 ckb-mock-tx-types = { git = "https://github.com/xxuejie/ckb-standalone-debugger", rev = "e6cd669" }
 env_logger = "0.11.2"
 serde_json = "1.0.103"
+
+daggy = "0.8.0"
+molecule = "0.7.5"
+proptest = "1.4.0"
+rand = "0.8.5"

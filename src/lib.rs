@@ -30,6 +30,9 @@ use std::sync::{Arc, Mutex};
 pub mod syscalls;
 pub mod types;
 
+#[cfg(test)]
+mod tests;
+
 const ROOT_VM_ID: VmId = FIRST_VM_ID;
 const MAX_INSTANTIATED_VMS: usize = 4;
 
@@ -356,7 +359,6 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
                         vm_id,
                         VmState::WaitForRead {
                             pipe: args.pipe,
-                            filled: 0,
                             length: args.length,
                             buffer_addr: args.buffer_addr,
                             length_addr: args.length_addr,
@@ -424,16 +426,12 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
         // Finish read / write syscalls for pipes that are closed on the other end
         for vm_id in closed_pipes {
             match self.states[&vm_id].clone() {
-                VmState::WaitForRead {
-                    filled,
-                    length_addr,
-                    ..
-                } => {
+                VmState::WaitForRead { length_addr, .. } => {
                     let (_, read_machine) = self.instantiated.get_mut(&vm_id).unwrap();
                     read_machine
                         .machine
                         .memory_mut()
-                        .store64(&length_addr, &filled)?;
+                        .store64(&length_addr, &0)?;
                     read_machine.machine.set_register(A0, SUCCESS as u64);
                     self.states.insert(vm_id, VmState::Runnable);
                 }
@@ -456,11 +454,10 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
         // Transfering data from write pipes to read pipes
         for [(read_vm_id, read_state), (write_vm_id, write_state)] in pairs {
             let VmState::WaitForRead {
-                pipe: read_pipe,
-                mut filled,
                 length: read_length,
                 buffer_addr: read_buffer_addr,
                 length_addr: read_length_addr,
+                ..
             } = read_state
             else {
                 unreachable!()
@@ -478,7 +475,7 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
 
             self.ensure_vms_instantiated(&[read_vm_id, write_vm_id])?;
             {
-                let fillable = read_length - filled;
+                let fillable = read_length;
                 let consumable = write_length - consumed;
                 let copiable = std::cmp::min(fillable, consumable);
 
@@ -498,33 +495,19 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
                     .1
                     .machine
                     .memory_mut()
-                    .store_bytes(read_buffer_addr.wrapping_add(filled), &data)?;
+                    .store_bytes(read_buffer_addr, &data)?;
 
-                // Update filled & consumed
-                filled += copiable;
-                if filled == read_length {
-                    // read VM has fulfilled its read request
-                    let (_, read_machine) = self.instantiated.get_mut(&read_vm_id).unwrap();
-                    read_machine
-                        .machine
-                        .memory_mut()
-                        .store64(&read_length_addr, &read_length)?;
-                    read_machine.machine.set_register(A0, SUCCESS as u64);
-                    self.states.insert(read_vm_id, VmState::Runnable);
-                } else {
-                    // Only update read VM state
-                    self.states.insert(
-                        read_vm_id,
-                        VmState::WaitForRead {
-                            pipe: read_pipe,
-                            filled,
-                            length: read_length,
-                            buffer_addr: read_buffer_addr,
-                            length_addr: read_length_addr,
-                        },
-                    );
-                }
+                // Read syscall terminates as soon as some data are filled
+                let (_, read_machine) = self.instantiated.get_mut(&read_vm_id).unwrap();
+                read_machine
+                    .machine
+                    .memory_mut()
+                    .store64(&read_length_addr, &copiable)?;
+                read_machine.machine.set_register(A0, SUCCESS as u64);
+                self.states.insert(read_vm_id, VmState::Runnable);
 
+                // Write syscall, however, terminates only when all the data
+                // have been written, or when the pairing read pipe is closed.
                 consumed += copiable;
                 if consumed == write_length {
                     // write VM has fulfilled its write request
