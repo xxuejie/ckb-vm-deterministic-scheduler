@@ -250,8 +250,15 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
         .map(|data| {
             let offset = std::cmp::min(offset as usize, data.len());
             let full_length = data.len() - offset;
-            let length = std::cmp::min(full_length, length as usize);
-            (data.slice(offset..offset + length), full_length as u64)
+            let slice_length = if length > 0 {
+                std::cmp::min(full_length, length as usize)
+            } else {
+                full_length
+            };
+            (
+                data.slice(offset..offset + slice_length),
+                full_length as u64,
+            )
         })
     }
 }

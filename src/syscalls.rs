@@ -182,6 +182,31 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
         Ok(())
     }
 
+    // Reimplementing debug syscall for printing debug messages
+    fn debug<Mac: SupportMachine>(&mut self, machine: &mut Mac) -> Result<(), Error> {
+        let mut addr = machine.registers()[A0].to_u64();
+        let mut buffer = Vec::new();
+
+        loop {
+            let byte = machine
+                .memory_mut()
+                .load8(&Mac::REG::from_u64(addr))?
+                .to_u8();
+            if byte == 0 {
+                break;
+            }
+            buffer.push(byte);
+            addr += 1;
+        }
+
+        machine.add_cycles_no_checking(transferred_byte_cycles(buffer.len() as u64))?;
+        let s = String::from_utf8(buffer)
+            .map_err(|e| Error::External(format!("String from buffer {e:?}")))?;
+        log::debug!("Debug print from VM {}: {}", self.id, s);
+
+        Ok(())
+    }
+
     // New, concurrent spawn implementation
     fn spawn<Mac: SupportMachine>(&mut self, machine: &mut Mac) -> Result<(), Error> {
         let index = machine.registers()[A0].to_u64();
@@ -223,11 +248,15 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
 
         let (instance_id_addr, pipes) = {
             let spgs_addr = machine.registers()[A5].to_u64();
-            let instance_id_addr = spgs_addr;
-            let pipes_indirect_addr = spgs_addr.wrapping_add(8);
+            let instance_id_addr_addr = spgs_addr;
+            let instance_id_addr = machine
+                .memory_mut()
+                .load64(&Mac::REG::from_u64(instance_id_addr_addr))?
+                .to_u64();
+            let pipes_addr_addr = spgs_addr.wrapping_add(8);
             let mut pipes_addr = machine
                 .memory_mut()
-                .load64(&Mac::REG::from_u64(pipes_indirect_addr))?
+                .load64(&Mac::REG::from_u64(pipes_addr_addr))?
                 .to_u64();
 
             let mut pipes = vec![];
@@ -425,6 +454,7 @@ impl<
             2042 => self.current_cycles(machine),
             2091 => self.load_cell_data_as_code(machine),
             2092 => self.load_cell_data(machine),
+            2177 => self.debug(machine),
             // The syscall numbers here are picked intentionally to be different
             // than currently assigned syscall numbers for spawn calls
             2601 => self.spawn(machine),

@@ -27,6 +27,7 @@ use ckb_vm::{
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
+pub mod dev_utils;
 pub mod syscalls;
 pub mod types;
 
@@ -197,6 +198,7 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
             ));
         }
         let vm_id_to_run = vm_id_to_run.unwrap();
+        log::debug!("Running VM {}", vm_id_to_run);
         let (result, consumed_cycles) = {
             self.ensure_vms_instantiated(&[vm_id_to_run])?;
             let (context, machine) = self.instantiated.get_mut(&vm_id_to_run).unwrap();
@@ -219,9 +221,12 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
         // 3. Process message box, update VM states accordingly
         self.process_message_box()?;
         assert!(self.message_box.lock().expect("lock").is_empty());
+        log::debug!("VM states: {:?}", self.states);
+        log::debug!("Pipes and owners: {:?}", self.pipes);
         // 4. If the VM terminates, update VMs in join state, also closes its pipes
         match result {
             Ok(code) => {
+                log::debug!("VM {} terminates with code {}", vm_id_to_run, code);
                 // When root VM terminates, the execution stops immediately, we will purge
                 // all non-root VMs, and only keep root VM in states.
                 // When non-root VM terminates, we only purge the VM's own states.
@@ -287,6 +292,10 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
                     // TODO: spawn limits
                     let spawned_vm_id =
                         self.boot_vm(&args.data_piece_id, args.offset, args.length, &args.argv)?;
+                    // Move passed pipes from spawner to spawnee
+                    for pipe in &args.pipes {
+                        self.pipes.insert(*pipe, spawned_vm_id);
+                    }
                     self.ensure_vms_instantiated(&[vm_id])?;
                     {
                         let (_, machine) = self.instantiated.get_mut(&vm_id).unwrap();
@@ -319,6 +328,7 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
                     // TODO: pipe limits
                     let (p1, p2, slot) = PipeId::create(self.next_pipe_slot);
                     self.next_pipe_slot = slot;
+                    log::debug!("VM {} creates pipes ({}, {})", vm_id, p1.0, p2.0);
 
                     self.pipes.insert(p1, vm_id);
                     self.pipes.insert(p2, vm_id);
@@ -655,6 +665,7 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
             .verifier
             .select_version(&self.tx_data.script_group.script)
             .map_err(|e| Error::Unexpected(format!("Select version error: {:?}", e)))?;
+        log::debug!("Creating VM {} using version {:?}", id, version);
         let core_machine = AsmCoreMachine::new(
             version.vm_isa(),
             version.vm_version(),
