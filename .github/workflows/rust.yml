@@ -1,0 +1,28 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: true
+    - name: Install llvm 16
+      run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 16 && rm llvm.sh
+    - name: Fmt
+      run: cargo fmt --check
+    - name: Build test contract
+      run: clang-16 --target=riscv64 -march=rv64imc_zba_zbb_zbc_zbs -nostdinc -nostdlib -g test-contracts/main.c -o test_bin -I test-contracts/ckb-c-stdlib -I test-contracts/ckb-c-stdlib/libc -I test-contracts/ckb-c-stdlib/molecule
+    - name: Run tests
+      run: cargo test --verbose
