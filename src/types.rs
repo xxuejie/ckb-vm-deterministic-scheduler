@@ -139,6 +139,7 @@ pub struct FullSuspendedState {
     pub next_pipe_slot: u64,
     pub vms: Vec<(VmId, VmState, Snapshot2<DataPieceId>)>,
     pub pipes: Vec<(PipeId, VmId)>,
+    pub terminated_vms: Vec<(VmId, i8)>,
 }
 
 impl FullSuspendedState {
@@ -165,6 +166,7 @@ impl FullSuspendedState {
                 acc
             })
             + (self.pipes.len() * (size_of::<PipeId>() + size_of::<VmId>()))) as u64
+            + (self.terminated_vms.len() * (size_of::<VmId>() + size_of::<i8>())) as u64
     }
 }
 

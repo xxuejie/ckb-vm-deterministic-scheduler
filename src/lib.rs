@@ -60,6 +60,7 @@ pub struct Scheduler<
     pipes: HashMap<PipeId, VmId>,
     instantiated: BTreeMap<VmId, (MachineContext<DL>, AsmMachine)>,
     suspended: HashMap<VmId, Snapshot2<DataPieceId>>,
+    terminated_vms: HashMap<VmId, i8>,
 
     // message_box is expected to be empty before returning from `run`
     // function, there is no need to persist messages.
@@ -82,6 +83,7 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
             instantiated: BTreeMap::default(),
             suspended: HashMap::default(),
             message_box: Arc::new(Mutex::new(Vec::new())),
+            terminated_vms: HashMap::default(),
         }
     }
 
@@ -114,6 +116,7 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
                 .map(|(id, _, snapshot)| (id, snapshot))
                 .collect(),
             message_box: Arc::new(Mutex::new(Vec::new())),
+            terminated_vms: full.terminated_vms.into_iter().collect(),
         }
     }
 
@@ -134,6 +137,7 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
             next_pipe_slot: self.next_pipe_slot,
             vms,
             pipes: self.pipes.into_iter().collect(),
+            terminated_vms: self.terminated_vms.into_iter().collect(),
         })
     }
 
@@ -227,6 +231,7 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
         match result {
             Ok(code) => {
                 log::debug!("VM {} terminates with code {}", vm_id_to_run, code);
+                self.terminated_vms.insert(vm_id_to_run, code);
                 // When root VM terminates, the execution stops immediately, we will purge
                 // all non-root VMs, and only keep root VM in states.
                 // When non-root VM terminates, we only purge the VM's own states.
@@ -307,6 +312,19 @@ impl<DL: CellDataProvider + HeaderProvider + ExtensionProvider + Send + Sync + C
                     }
                 }
                 Message::Join(vm_id, args) => {
+                    if let Some(exit_code) = self.terminated_vms.get(&args.target_id).copied() {
+                        self.ensure_vms_instantiated(&[vm_id])?;
+                        {
+                            let (_, machine) = self.instantiated.get_mut(&vm_id).unwrap();
+                            machine
+                                .machine
+                                .memory_mut()
+                                .store8(&args.exit_code_addr, &u64::from_i8(exit_code))?;
+                            machine.machine.set_register(A0, SUCCESS as u64);
+                            self.states.insert(vm_id, VmState::Runnable);
+                        }
+                        continue;
+                    }
                     if !self.states.contains_key(&args.target_id) {
                         self.ensure_vms_instantiated(&[vm_id])?;
                         {

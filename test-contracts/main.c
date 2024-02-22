@@ -326,10 +326,10 @@ int main(int argc, char *argv[]) {
     size_t j = spawned_count - i - 1;
     int8_t exit_code = 0xFF;
     ret = ckb_join(spawned_vms[j], &exit_code);
-    if (ret != 0 && ret != 5) {
+    if (ret != 0) {
       return ret;
     }
-    if (ret == 0 && exit_code != 0) {
+    if (exit_code != 0) {
       return exit_code;
     }
   }
